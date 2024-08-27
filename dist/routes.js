@@ -168,6 +168,50 @@
     }
   };
 
+  // node_modules/@sygnal/sse/dist/debug.js
+  var DEFAULT_APP_NAME = "Site";
+  var Debug = class {
+    get persistentDebug() {
+      return Boolean(localStorage.getItem(this._localStorageDebugFlag));
+    }
+    set persistentDebug(active) {
+      if (active) {
+        localStorage.setItem(this._localStorageDebugFlag, "true");
+        console.debug(`${this._appName} debug enabled (persistent).`);
+      } else {
+        localStorage.removeItem(this._localStorageDebugFlag);
+        console.debug(`${this._appName} debug disabled (persistent).`);
+      }
+    }
+    get enabled() {
+      var wfuDebugValue = Boolean(localStorage.getItem(this._localStorageDebugFlag));
+      wfuDebugValue = wfuDebugValue || this._enabled;
+      return wfuDebugValue;
+    }
+    set enabled(active) {
+      this._enabled = active;
+    }
+    constructor(label, appName = DEFAULT_APP_NAME) {
+      this._localStorageDebugFlag = "debug-mode";
+      this._appName = DEFAULT_APP_NAME;
+      this._enabled = false;
+      this._appName = appName;
+      this._label = label;
+    }
+    group(name) {
+      if (this.enabled)
+        console.group(name);
+    }
+    groupEnd() {
+      if (this.enabled)
+        console.groupEnd();
+    }
+    debug(...args) {
+      if (this.enabled)
+        console.debug(this._label, ...args);
+    }
+  };
+
   // node_modules/js-cookie/dist/js.cookie.mjs
   function assign(target) {
     for (var i = 1; i < arguments.length; i++) {
@@ -311,11 +355,208 @@
   // src/site.ts
   var Site = class {
     constructor() {
+      this.debug = new Debug("site", "SSE");
     }
     setup() {
       Page.loadEngineCSS("site.css");
     }
     exec() {
+      this.scrollToElementWithOffset();
+      window.addEventListener(
+        "hashchange",
+        this.scrollToElementWithOffset.bind(this)
+      );
+    }
+    scrollToElementWithOffset() {
+      if (window.location.hash) {
+        const originalHash = window.location.hash;
+        history.replaceState(null, "", " ");
+        this.debug.debug("Suppressed initial hash:", originalHash);
+        setTimeout(() => {
+          const fixedElement = document.querySelector("body > *");
+          this.debug.debug("First element in body:", fixedElement);
+          let offset = 0;
+          if (fixedElement) {
+            const computedStyle = window.getComputedStyle(fixedElement);
+            this.debug.debug("Computed style of first element:", computedStyle.position);
+            if (computedStyle.position === "fixed") {
+              offset = fixedElement.offsetHeight;
+              this.debug.debug("Fixed element detected with height:", offset);
+            } else {
+              this.debug.debug("First element is not fixed position");
+            }
+          } else {
+            this.debug.debug("No elements found in body");
+          }
+          history.replaceState(null, "", originalHash);
+          this.debug.debug("Restored the original hash:", originalHash);
+          const element = document.querySelector(originalHash);
+          this.debug.debug("Target element for hash:", element);
+          if (element) {
+            const elementPosition = element.getBoundingClientRect().top + window.scrollY;
+            const offsetPosition = elementPosition - offset;
+            this.debug.debug("Element position:", elementPosition);
+            this.debug.debug("Offset position:", offsetPosition);
+            window.scrollTo({
+              top: offsetPosition,
+              behavior: "smooth"
+            });
+            this.debug.debug("Scrolling to position with offset");
+          } else {
+            this.debug.debug("No element found for the hash:", originalHash);
+          }
+        }, 0);
+      } else {
+        this.debug.debug("No hash in the URL");
+      }
+    }
+  };
+
+  // src/page/apply.ts
+  var MAILJET_TEMPLATE_YES = "5842233";
+  var ApplicationPage = class {
+    constructor() {
+      this.form = null;
+    }
+    setup() {
+    }
+    exec() {
+      const div = document.getElementById("application");
+      if (!div) {
+        console.error("Div with ID 'application' not found.");
+        return;
+      }
+      this.form = div.querySelector("form");
+      if (!this.form) {
+        console.error("Form inside 'application' div not found.");
+        return;
+      }
+      this.initializeForm();
+    }
+    waitButton(formElement) {
+      const actualButton = formElement.querySelector('[button-submit="actual"]');
+      if (actualButton) {
+        actualButton.style.display = "none";
+      }
+      const waitButton = formElement.querySelector('[button-submit="wait"]');
+      if (waitButton) {
+        waitButton.style.display = "block";
+      }
+    }
+    initializeForm() {
+      const savedId = localStorage.getItem("customerId");
+      if (savedId) {
+        const inputElement = this.form.querySelector("#airtableId");
+        if (inputElement) {
+          inputElement.value = savedId;
+        }
+      } else {
+        console.log("No ID found in localStorage.");
+      }
+      console.log("adding event listener for form submit");
+      this.form.addEventListener("submit", this.handleFormSubmit.bind(this, this.form));
+    }
+    determineEmailTemplate() {
+      return MAILJET_TEMPLATE_YES;
+    }
+    handleFormSubmit(form, event) {
+      event.preventDefault();
+      console.log("formdata", form);
+      this.waitButton(form);
+      const inputElement = this.form.querySelector("#emailTemplateId");
+      if (inputElement) {
+        inputElement.value = this.determineEmailTemplate();
+      }
+      const formData = new FormData(form);
+      const jsonData = {};
+      formData.forEach((value, key) => {
+        jsonData[key] = value;
+      });
+      const redirectUrl = form.getAttribute("data-redirect") || "";
+      const webhookUrl = form.getAttribute("action") || "";
+      console.log(jsonData);
+      fetch(webhookUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(jsonData)
+      }).then((response) => response.json()).then((data) => {
+        window.location.href = "/final/thank-you";
+      }).catch((error) => {
+        console.error("Error submitting form to webhook:", error);
+      });
+    }
+  };
+
+  // src/page/pre-apply.ts
+  var PreApplicationPage = class {
+    constructor() {
+    }
+    setup() {
+    }
+    exec() {
+      console.log("running pre-appl..");
+      const div = document.getElementById("pre-application");
+      if (!div) {
+        console.error("Div with ID 'pre-application' not found.");
+        return;
+      }
+      const form = div.querySelector("form");
+      if (!form) {
+        console.error("Form inside 'pre-application' div not found.");
+        return;
+      }
+      form.addEventListener("submit", this.handleFormSubmit.bind(this));
+    }
+    waitButton(formElement) {
+      console.log("display waitButton");
+      const actualButton = formElement.querySelector('[button-submit="actual"]');
+      if (actualButton) {
+        actualButton.style.display = "none";
+      }
+      const waitButton = formElement.querySelector('[button-submit="wait"]');
+      if (waitButton) {
+        waitButton.style.display = "block";
+      }
+    }
+    handleFormSubmit(event) {
+      event.preventDefault();
+      const form = event.target;
+      this.waitButton(form);
+      console.log("formdata", form);
+      const formData = new FormData(form);
+      const jsonData = {};
+      formData.forEach((value, key) => {
+        jsonData[key] = value;
+      });
+      const redirectUrl = form.getAttribute("data-redirect") || "";
+      const webhookUrl = form.getAttribute("action") || "";
+      console.log(jsonData);
+      fetch(webhookUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(jsonData)
+      }).then((response) => {
+        if (!response.ok) {
+          throw new Error(`Network response was not ok: ${response.statusText}`);
+        }
+        return response.json();
+      }).then((data) => {
+        if (data && data.id) {
+          console.log(data.id);
+          localStorage.setItem("customerId", data.id);
+          if (redirectUrl) {
+            window.location.href = redirectUrl;
+          }
+        } else {
+          console.error("ID was not returned from the webhook.");
+        }
+      }).catch((error) => {
+        console.error("Error submitting form to webhook:", error);
+      });
     }
   };
 
@@ -323,7 +564,9 @@
   var routeDispatcher = () => {
     var routeDispatcher2 = new RouteDispatcher(Site);
     routeDispatcher2.routes = {
-      "/": HomePage
+      "/": HomePage,
+      "/pre-application": PreApplicationPage,
+      "/application": ApplicationPage
     };
     return routeDispatcher2;
   };

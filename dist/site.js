@@ -158,6 +158,50 @@
     }
   };
 
+  // node_modules/@sygnal/sse/dist/debug.js
+  var DEFAULT_APP_NAME = "Site";
+  var Debug = class {
+    get persistentDebug() {
+      return Boolean(localStorage.getItem(this._localStorageDebugFlag));
+    }
+    set persistentDebug(active) {
+      if (active) {
+        localStorage.setItem(this._localStorageDebugFlag, "true");
+        console.debug(`${this._appName} debug enabled (persistent).`);
+      } else {
+        localStorage.removeItem(this._localStorageDebugFlag);
+        console.debug(`${this._appName} debug disabled (persistent).`);
+      }
+    }
+    get enabled() {
+      var wfuDebugValue = Boolean(localStorage.getItem(this._localStorageDebugFlag));
+      wfuDebugValue = wfuDebugValue || this._enabled;
+      return wfuDebugValue;
+    }
+    set enabled(active) {
+      this._enabled = active;
+    }
+    constructor(label, appName = DEFAULT_APP_NAME) {
+      this._localStorageDebugFlag = "debug-mode";
+      this._appName = DEFAULT_APP_NAME;
+      this._enabled = false;
+      this._appName = appName;
+      this._label = label;
+    }
+    group(name) {
+      if (this.enabled)
+        console.group(name);
+    }
+    groupEnd() {
+      if (this.enabled)
+        console.groupEnd();
+    }
+    debug(...args) {
+      if (this.enabled)
+        console.debug(this._label, ...args);
+    }
+  };
+
   // node_modules/js-cookie/dist/js.cookie.mjs
   function assign(target) {
     for (var i = 1; i < arguments.length; i++) {
@@ -259,11 +303,60 @@
   // src/site.ts
   var Site = class {
     constructor() {
+      this.debug = new Debug("site", "SSE");
     }
     setup() {
       Page.loadEngineCSS("site.css");
     }
     exec() {
+      this.scrollToElementWithOffset();
+      window.addEventListener(
+        "hashchange",
+        this.scrollToElementWithOffset.bind(this)
+      );
+    }
+    scrollToElementWithOffset() {
+      if (window.location.hash) {
+        const originalHash = window.location.hash;
+        history.replaceState(null, "", " ");
+        this.debug.debug("Suppressed initial hash:", originalHash);
+        setTimeout(() => {
+          const fixedElement = document.querySelector("body > *");
+          this.debug.debug("First element in body:", fixedElement);
+          let offset = 0;
+          if (fixedElement) {
+            const computedStyle = window.getComputedStyle(fixedElement);
+            this.debug.debug("Computed style of first element:", computedStyle.position);
+            if (computedStyle.position === "fixed") {
+              offset = fixedElement.offsetHeight;
+              this.debug.debug("Fixed element detected with height:", offset);
+            } else {
+              this.debug.debug("First element is not fixed position");
+            }
+          } else {
+            this.debug.debug("No elements found in body");
+          }
+          history.replaceState(null, "", originalHash);
+          this.debug.debug("Restored the original hash:", originalHash);
+          const element = document.querySelector(originalHash);
+          this.debug.debug("Target element for hash:", element);
+          if (element) {
+            const elementPosition = element.getBoundingClientRect().top + window.scrollY;
+            const offsetPosition = elementPosition - offset;
+            this.debug.debug("Element position:", elementPosition);
+            this.debug.debug("Offset position:", offsetPosition);
+            window.scrollTo({
+              top: offsetPosition,
+              behavior: "smooth"
+            });
+            this.debug.debug("Scrolling to position with offset");
+          } else {
+            this.debug.debug("No element found for the hash:", originalHash);
+          }
+        }, 0);
+      } else {
+        this.debug.debug("No hash in the URL");
+      }
     }
   };
 })();
